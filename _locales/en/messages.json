@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "ChatGPT Side Navigation"
+  },
+  "extDescription": {
+    "message": "Floating ChatGPT sidebar with outline, bookmarks, search, export, timeline navigation, and layout controls."
+  },
+  "actionTitle": {
+    "message": "Open ChatGPT Side Navigation settings"
+  }
+}

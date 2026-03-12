@@ -1,10 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "ChatGPT侧边目录导航栏",
-  "version": "13.147",
-  "description": "ChatGPT:侧边目录/书签/搜索/导出。弱引用/限量渲染，性能优秀。",
+  "default_locale": "en",
+  "name": "__MSG_extName__",
+  "version": "13.149",
+  "description": "__MSG_extDescription__",
   "permissions": ["storage"],
   "action": {
+    "default_title": "__MSG_actionTitle__",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -20,7 +22,7 @@
     {
       "matches": ["https://chatgpt.com/*"],
       "css": ["content.css"],
-      "js": ["content.js"],
+      "js": ["i18n.js", "content.js"],
       "run_at": "document_idle"
     },
     {

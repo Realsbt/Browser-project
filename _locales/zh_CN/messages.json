@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "ChatGPT 侧边导航栏"
+  },
+  "extDescription": {
+    "message": "ChatGPT 浮动侧边栏，提供目录、书签、搜索、导出、时间线导航和布局控制。"
+  },
+  "actionTitle": {
+    "message": "打开 ChatGPT 侧边导航栏设置"
+  }
+}

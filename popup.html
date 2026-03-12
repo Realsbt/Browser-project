@@ -129,11 +129,11 @@ body {
 .toggle input:checked + .slider::before {
   transform: translateX(16px);
 }
-.theme-btns {
+.choice-btns {
   display: flex;
   gap: 8px;
 }
-.theme-btn {
+.choice-btn {
   flex: 1;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -144,10 +144,10 @@ body {
   cursor: pointer;
   transition: .15s;
 }
-.theme-btn:hover {
+.choice-btn:hover {
   background: var(--card-strong);
 }
-.theme-btn.active {
+.choice-btn.active {
   background: var(--accent-soft);
   border-color: transparent;
   color: var(--text);
@@ -210,22 +210,30 @@ body {
     <div class="header">
       <img src="icons/icon48.png" alt="icon">
       <div class="header-text">
-        <h1>ChatGPT 侧边导航栏</h1>
+        <h1 data-i18n="popup_header_title">ChatGPT 侧边导航栏</h1>
         <p id="version"></p>
       </div>
     </div>
 
     <div class="section">
-      <div class="section-title">设置</div>
+      <div class="section-title" data-i18n="popup_section_language">语言</div>
+      <div class="choice-btns">
+        <button class="choice-btn lang-btn" data-lang="zh-CN" data-i18n="popup_lang_zh">中文</button>
+        <button class="choice-btn lang-btn" data-lang="en" data-i18n="popup_lang_en">English</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title" data-i18n="popup_section_settings">设置</div>
       <div class="row">
-        <span class="row-label">启用侧边栏</span>
+        <span class="row-label" data-i18n="popup_enable_sidebar">启用侧边栏</span>
         <label class="toggle">
           <input type="checkbox" id="toggle-enabled" checked>
           <span class="slider"></span>
         </label>
       </div>
       <div class="row">
-        <span class="row-label">性能模式</span>
+        <span class="row-label" data-i18n="popup_performance_mode">性能模式</span>
         <label class="toggle">
           <input type="checkbox" id="toggle-fx">
           <span class="slider"></span>
@@ -234,49 +242,39 @@ body {
     </div>
 
     <div class="section">
-      <div class="section-title">宽度</div>
+      <div class="section-title" data-i18n="popup_section_width">宽度</div>
       <div class="range-card">
         <div class="range-head">
-          <span class="range-label">主对话区宽度</span>
+          <span class="range-label" data-i18n="popup_chat_width">主对话区宽度</span>
           <span class="range-value" id="chat-width-value"></span>
         </div>
         <input class="range-input" type="range" id="chat-width" min="720" max="1440" step="20">
         <div class="range-tips">
-          <span>紧凑</span>
-          <span>宽</span>
-        </div>
-      </div>
-      <div class="range-card">
-        <div class="range-head">
-          <span class="range-label">侧栏宽度</span>
-          <span class="range-value" id="sidebar-width-value"></span>
-        </div>
-        <input class="range-input" type="range" id="sidebar-width" min="188" max="288" step="4">
-        <div class="range-tips">
-          <span>窄</span>
-          <span>宽</span>
+          <span data-i18n="popup_width_compact">紧凑</span>
+          <span data-i18n="popup_width_wide">宽</span>
         </div>
       </div>
     </div>
 
     <div class="section">
-      <div class="section-title">主题</div>
-      <div class="theme-btns">
-        <button class="theme-btn" data-theme="light">浅色</button>
-        <button class="theme-btn" data-theme="dark">深色</button>
+      <div class="section-title" data-i18n="popup_section_theme">主题</div>
+      <div class="choice-btns">
+        <button class="choice-btn theme-btn" data-theme="light" data-i18n="popup_theme_light">浅色</button>
+        <button class="choice-btn theme-btn" data-theme="dark" data-i18n="popup_theme_dark">深色</button>
       </div>
     </div>
 
     <div class="section">
-      <div class="section-title">快捷键</div>
+      <div class="section-title" data-i18n="popup_section_shortcuts">快捷键</div>
       <div class="shortcuts">
-        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 聚焦搜索框<br>
-        <kbd>Esc</kbd> 清空搜索 / 取消聚焦<br>
-        点击 ✦ 添加书签 · 右键复制消息
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> <span data-i18n="popup_shortcut_focus">聚焦搜索框</span><br>
+        <kbd>Esc</kbd> <span data-i18n="popup_shortcut_escape">清空搜索 / 取消聚焦</span><br>
+        <span data-i18n="popup_shortcut_bookmark">点击 ✦ 添加书签 · 右键复制消息</span>
       </div>
     </div>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

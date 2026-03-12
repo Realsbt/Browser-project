@@ -259,6 +259,10 @@ main [class*="l-thread-content-max-width-"] .text-message > * {
   width: 100%;
 }
 
+.ai-actions-four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .ai-btn {
   appearance: none;
   border: 0;
@@ -452,12 +456,47 @@ main [class*="l-thread-content-max-width-"] .text-message > * {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
 }
 
-.ai-wide {
-  width: 288px !important;
+.ai-msg-bookmark-host {
+  position: relative;
 }
 
-.ai-norm {
-  width: 188px !important;
+.ai-msg-bookmark-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--at-bd);
+  border-radius: 999px;
+  background: var(--at-bg);
+  color: var(--at-s-off);
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+  transition: opacity 0.15s, color 0.15s, transform 0.15s, background 0.15s;
+  box-shadow: var(--at-shd);
+}
+
+.ai-msg-bookmark-host:hover > .ai-msg-bookmark-btn,
+.ai-msg-bookmark-btn.active,
+.ai-msg-bookmark-btn:focus-visible {
+  opacity: 1;
+}
+
+.ai-msg-bookmark-btn:hover,
+.ai-msg-bookmark-btn:focus-visible {
+  color: var(--at-act);
+  transform: scale(1.04);
+}
+
+.ai-msg-bookmark-btn.active {
+  color: var(--at-s-on);
+  background: var(--at-mark-bg);
+}
+
+.ai-msg-bookmark-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--at-focus-ring);
 }
 
 .ai-hide #ai-body,

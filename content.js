@@ -4,9 +4,9 @@
   window.__AI_TOC_GPT__ = true;
 
   const NS = 'gpt';
+  const { normalizeLanguage, detectDefaultLanguage, t } = window.AI_TOC_I18N;
   const CFG = {
     minW: 188,
-    maxW: 288,
     chatMinW: 720,
     chatMaxW: 1440,
     chatDefaultW: 960,
@@ -16,17 +16,17 @@
     IDLE_TIMEOUT: 800
   };
 
-  const STORAGE_KEYS = ['bookmarks', 'collapsed', 'wide', 'pos', 'theme', 'reduceFx', 'enabled', 'chatWidth', 'sidebarWidth'];
+  const STORAGE_KEYS = ['bookmarks', 'manualBookmarks', 'collapsed', 'pos', 'theme', 'reduceFx', 'enabled', 'chatWidth', 'language'];
   const STORAGE_DEFAULTS = {
     bookmarks: [],
+    manualBookmarks: [],
     collapsed: false,
-    wide: false,
     pos: { x: -1, y: 100 },
     theme: 'dark',
     reduceFx: true,
     enabled: true,
     chatWidth: CFG.chatDefaultW,
-    sidebarWidth: CFG.minW
+    language: detectDefaultLanguage()
   };
 
   const Utils = {
@@ -104,19 +104,15 @@
 
       this.state = {
         enabled: stored.enabled,
-        marks: new Set(stored.bookmarks),
+        marks: new Set((stored.bookmarks || []).map((value) => this.normalizeStoredBookmarkId(value)).filter(Boolean)),
+        manualMarks: new Set((stored.manualBookmarks || []).map((value) => this.normalizeStoredBookmarkId(value)).filter(Boolean)),
         isCollapsed: stored.collapsed,
-        isWide: stored.wide,
         pos: stored.pos,
         theme: this.normalizeTheme(stored.theme),
+        language: this.normalizeLanguage(stored.language),
         activeKey: '',
         keyword: '',
         chatWidth: this.normalizeChatWidth(stored.chatWidth),
-        sidebarWidth: this.normalizeSidebarWidth(
-          typeof stored.sidebarWidth === 'number'
-            ? stored.sidebarWidth
-            : (stored.wide ? CFG.maxW : CFG.minW)
-        ),
         reduceFx: stored.reduceFx,
         isDragging: false,
         offset: { x: 0, y: 0 }
@@ -125,11 +121,11 @@
       if (stored.theme !== this.state.theme) {
         Utils.storage.set('theme', this.state.theme);
       }
+      if (stored.language !== this.state.language) {
+        Utils.storage.set('language', this.state.language);
+      }
       if (stored.chatWidth !== this.state.chatWidth) {
         Utils.storage.set('chatWidth', this.state.chatWidth);
-      }
-      if (stored.sidebarWidth !== this.state.sidebarWidth) {
-        Utils.storage.set('sidebarWidth', this.state.sidebarWidth);
       }
 
       this.dom = {};
@@ -150,16 +146,28 @@
       return theme === 'light' ? 'light' : 'dark';
     }
 
+    normalizeLanguage(language) {
+      return normalizeLanguage(language);
+    }
+
+    t(key, params) {
+      return t(this.state.language, key, params);
+    }
+
+    normalizeStoredBookmarkId(value) {
+      if (typeof value !== 'string') return '';
+      if (value.startsWith('mid:') || value.startsWith('id:') || value.startsWith('hash:')) return value;
+      if (value.startsWith('h:')) {
+        const parts = value.split(':');
+        if (parts[1]) return `hash:${parts[1]}`;
+      }
+      return value;
+    }
+
     normalizeChatWidth(width) {
       const n = Number(width);
       if (!Number.isFinite(n)) return CFG.chatDefaultW;
       return Math.max(CFG.chatMinW, Math.min(CFG.chatMaxW, Math.round(n)));
-    }
-
-    normalizeSidebarWidth(width) {
-      const n = Number(width);
-      if (!Number.isFinite(n)) return CFG.minW;
-      return Math.max(CFG.minW, Math.min(CFG.maxW, Math.round(n)));
     }
 
     applyTheme(theme) {
@@ -176,6 +184,41 @@
       applyTo(this.dom.timeline);
       this.state.theme = normalizedTheme;
       return normalizedTheme;
+    }
+
+    updateLocalizedUI() {
+      if (this.dom.root) this.dom.root.lang = this.state.language;
+      if (this.dom.timeline) this.dom.timeline.lang = this.state.language;
+
+      if (this.dom.head) {
+        const title = this.t('content_drag_sidebar');
+        this.dom.head.title = title;
+        this.dom.head.setAttribute('aria-label', title);
+      }
+
+      if (this.dom.search) {
+        const placeholder = this.t('content_search_placeholder');
+        this.dom.search.placeholder = placeholder;
+        this.dom.search.setAttribute('aria-label', placeholder);
+      }
+
+      if (this.dom.btnTop) this.setButtonIcon(this.dom.btnTop, 'top', this.t('content_scroll_top'));
+      if (this.dom.btnBot) this.setButtonIcon(this.dom.btnBot, 'bottom', this.t('content_scroll_bottom'));
+      if (this.dom.exportBtn) this.setButtonIcon(this.dom.exportBtn, 'copy', this.t('content_export_hint'));
+      this.syncInlineBookmarkButtons();
+
+      this.updateActionButtons();
+    }
+
+    setLanguage(language, persist = false) {
+      const normalizedLanguage = this.normalizeLanguage(language);
+      this.state.language = normalizedLanguage;
+      this.updateLocalizedUI();
+      this.renderListFull();
+      if (persist) {
+        Utils.storage.set('language', normalizedLanguage);
+      }
+      return normalizedLanguage;
     }
 
     getActionIcon(name) {
@@ -201,8 +244,12 @@
     }
 
     makeTimelineTitle(it) {
-      const parts = [`第 ${it.idx} 次发送`];
-      if (this.state.marks.has(it.key)) parts.push('已加书签');
+      const parts = [
+        it.role === 'assistant'
+          ? this.t('content_timeline_ai_bookmark')
+          : this.t('content_timeline_entry', { index: it.idx })
+      ];
+      if (this.state.marks.has(it.bookmarkId)) parts.push(this.t('content_bookmarked'));
       if (it.preview) parts.push(it.preview);
       return parts.join('\n');
     }
@@ -234,7 +281,7 @@
       const node = document.createElement('button');
       node.type = 'button';
       node.className = 'ai-timeline-node';
-      if (this.state.marks.has(it.key)) node.classList.add('bookmark');
+      if (this.state.marks.has(it.bookmarkId)) node.classList.add('bookmark');
       if (this.state.activeKey === it.key) node.classList.add('active');
       node.dataset.key = it.key;
       node.title = this.makeTimelineTitle(it);
@@ -514,12 +561,12 @@
         if (targets.length) {
           this.flashChatWidthTargets(targets);
           if (appliedWidth > 0 && appliedWidth < normalizedWidth - 12) {
-            Utils.toast(`主对话区 ${appliedWidth}px（已达页面上限）`);
+            Utils.toast(this.t('content_chat_width_limited', { width: appliedWidth }));
           } else {
-            Utils.toast(`主对话区宽度 ${normalizedWidth}px`);
+            Utils.toast(this.t('content_chat_width_applied', { width: normalizedWidth }));
           }
         } else {
-          Utils.toast('未找到主对话区容器');
+          Utils.toast(this.t('content_chat_width_missing'));
         }
       }
 
@@ -548,23 +595,12 @@
       };
     }
 
-    applySidebarWidth(width, persist = false) {
-      const normalizedWidth = this.normalizeSidebarWidth(width);
-      this.state.sidebarWidth = normalizedWidth;
-      this.state.isWide = normalizedWidth > (CFG.minW + CFG.maxW) / 2;
-
+    applySidebarWidth() {
       if (this.dom.root) {
-        this.dom.root.style.width = normalizedWidth + 'px';
-        this.dom.root.classList.toggle('ai-wide', this.state.isWide);
-        this.dom.root.classList.toggle('ai-norm', !this.state.isWide);
+        this.dom.root.style.width = CFG.minW + 'px';
       }
 
       this.updateActionButtons();
-
-      if (persist) {
-        Utils.storage.set('sidebarWidth', normalizedWidth);
-        Utils.storage.set('wide', this.state.isWide);
-      }
     }
 
     flashChatWidthTargets(targets) {
@@ -591,18 +627,11 @@
     }
 
     updateActionButtons() {
-      if (this.dom.btnWide) {
-        this.setButtonIcon(
-          this.dom.btnWide,
-          this.state.isWide ? 'narrow' : 'wide',
-          this.state.isWide ? '收窄宽度' : '展开宽度'
-        );
-      }
       if (this.dom.btnFold) {
         this.setButtonIcon(
           this.dom.btnFold,
           this.state.isCollapsed ? 'collapse' : 'expand',
-          this.state.isCollapsed ? '展开目录' : '收起目录'
+          this.state.isCollapsed ? this.t('content_action_expand') : this.t('content_action_collapse')
         );
       }
     }
@@ -616,6 +645,13 @@
 
     getSelectors() {
       return 'div[data-message-author-role="user"]';
+    }
+
+    getAllMessageNodes(role) {
+      const root = this.chatRoot || this.findChatRoot();
+      const nodes = root ? Array.from(root.querySelectorAll('div[data-message-author-role]')) : [];
+      if (!role) return nodes;
+      return nodes.filter((node) => node.getAttribute('data-message-author-role') === role);
     }
 
     findChatRoot() {
@@ -639,7 +675,7 @@
         return el;
       };
 
-      this.dom.root = mk('div', this.state.isWide ? 'ai-wide' : 'ai-norm', { id: 'ai-toc' });
+      this.dom.root = mk('div', '', { id: 'ai-toc' });
       if (this.state.isCollapsed) this.dom.root.classList.add('ai-hide');
       if (this.state.reduceFx) this.dom.root.classList.add('fx-off');
       this.dom.timeline = mk('div', '', { id: 'ai-timeline' });
@@ -648,33 +684,29 @@
       this.dom.timeline.append(this.dom.timelineTrack);
       this.applyTheme(this.state.theme);
 
-      const head = mk('div', '', { id: 'ai-head', title: '拖动移动侧栏' });
-      head.append(mk('span', 'ai-grip'));
+      this.dom.head = mk('div', '', { id: 'ai-head' });
+      this.dom.head.append(mk('span', 'ai-grip'));
 
-      this.dom.search = mk('input', '', { id: 'ai-search', placeholder: '搜索对话...', type: 'text' });
+      this.dom.search = mk('input', '', { id: 'ai-search', type: 'text' });
       this.dom.body = mk('div', '', { id: 'ai-body' });
 
       const foot = mk('div', '', { id: 'ai-foot' });
       const controls = mk('div', 'ai-controls');
-      const actions = mk('div', 'ai-actions');
-      const btnTop = mk('button', 'ai-btn', { type: 'button' });
-      const btnBot = mk('button', 'ai-btn', { type: 'button' });
-      this.dom.btnWide = mk('button', 'ai-btn', { type: 'button' });
+      const actions = mk('div', 'ai-actions ai-actions-four');
+      this.dom.btnTop = mk('button', 'ai-btn', { type: 'button' });
+      this.dom.btnBot = mk('button', 'ai-btn', { type: 'button' });
       this.dom.btnFold = mk('button', 'ai-btn', { type: 'button' });
-      const exportBtn = mk('button', 'ai-btn', { type: 'button' });
-      this.setButtonIcon(btnTop, 'top', '滚动到顶部');
-      this.setButtonIcon(btnBot, 'bottom', '滚动到底部');
-      this.setButtonIcon(exportBtn, 'copy', '左键：复制目录\nShift+左键：导出完整对话');
-      this.updateActionButtons();
+      this.dom.exportBtn = mk('button', 'ai-btn', { type: 'button' });
+      this.updateLocalizedUI();
 
-      actions.append(btnTop, btnBot, this.dom.btnWide, this.dom.btnFold, exportBtn);
+      actions.append(this.dom.btnTop, this.dom.btnBot, this.dom.btnFold, this.dom.exportBtn);
       controls.append(this.dom.search, actions);
       foot.append(controls);
 
-      this.dom.root.append(head, this.dom.body, foot);
+      this.dom.root.append(this.dom.head, this.dom.body, foot);
       document.body.appendChild(this.dom.root);
       document.body.appendChild(this.dom.timeline);
-      this.applySidebarWidth(this.state.sidebarWidth);
+      this.applySidebarWidth();
 
       const clampX = (x) => Math.max(0, Math.min(x, window.innerWidth - 60));
       const clampY = (y) => Math.max(0, Math.min(y, window.innerHeight - 40));
@@ -688,13 +720,12 @@
         this.dom.root.style.right = '20px';
       }
 
-      this.dom.btnWide.onclick = () => this.toggleWidth();
       this.dom.btnFold.onclick = () => this.toggleCollapse();
-      btnTop.onclick = () => this.dom.body.scrollTo({ top: 0, behavior: 'smooth' });
-      btnBot.onclick = () => this.dom.body.scrollTo({ top: this.dom.body.scrollHeight, behavior: 'smooth' });
-      exportBtn.onclick = (e) => this.handleExport(e);
+      this.dom.btnTop.onclick = () => this.scrollSidebarOrPage('top');
+      this.dom.btnBot.onclick = () => this.scrollSidebarOrPage('bottom');
+      this.dom.exportBtn.onclick = (e) => this.handleExport(e);
 
-      this.renderEmpty('等待对话...');
+      this.renderEmpty(this.t('content_waiting'));
       this.syncTimelinePosition();
     }
 
@@ -711,16 +742,25 @@
 
         const key = itemEl.dataset.key;
         if (!key) return;
+        const it = this.cache.key2item.get(key);
+        if (!it) return;
 
         if (star) {
-          if (this.state.marks.has(key)) {
-            this.state.marks.delete(key);
-            itemEl.classList.remove('mark');
+          if (this.state.marks.has(it.bookmarkId)) {
+            this.state.marks.delete(it.bookmarkId);
+            if (it.role !== 'user') {
+              this.state.manualMarks.delete(it.bookmarkId);
+              this.removeItemByBookmarkId(it.bookmarkId);
+            }
           } else {
-            this.state.marks.add(key);
-            itemEl.classList.add('mark');
+            this.state.marks.add(it.bookmarkId);
+            if (it.role !== 'user') {
+              this.state.manualMarks.add(it.bookmarkId);
+            }
           }
-          Utils.storage.set('bookmarks', Array.from(this.state.marks));
+          this.persistMarks();
+          this.syncInlineBookmarkButtons();
+          this.renderListFull();
           this.renderTimeline();
           return;
         }
@@ -737,8 +777,8 @@
         const it = this.cache.key2item.get(key);
         if (!it) return;
         navigator.clipboard.writeText(it.txt || '')
-          .then(() => Utils.toast('已复制内容'))
-          .catch(() => Utils.toast('复制失败'));
+          .then(() => Utils.toast(this.t('content_copied')))
+          .catch(() => Utils.toast(this.t('content_copy_failed')));
       });
 
       this.dom.timeline.addEventListener('click', (e) => {
@@ -758,7 +798,7 @@
         e.currentTarget.style.cursor = 'grabbing';
       };
 
-      const head = this.dom.root.querySelector('#ai-head');
+      const head = this.dom.head;
       const foot = this.dom.root.querySelector('#ai-foot');
       head.onmousedown = startDrag;
       foot.onmousedown = startDrag;
@@ -887,6 +927,9 @@
             }
           }
         }
+        if (shouldRefreshTimeline) {
+          this.syncInlineBookmarkButtons();
+        }
         if (anyNew) {
           this.applyChatWidth(this.state.chatWidth, false, 'observer:anyNew');
           this.scheduleRender();
@@ -934,6 +977,104 @@
       return { key, kind: 'weak', val: h, weak };
     }
 
+    makeBookmarkId(anchor, txt) {
+      if (anchor.kind === 'mid') return `mid:${anchor.val}`;
+      if (anchor.kind === 'id') return `id:${anchor.val}`;
+      return `hash:${Utils.hash32(txt)}`;
+    }
+
+    persistMarks() {
+      Utils.storage.set('bookmarks', Array.from(this.state.marks));
+      Utils.storage.set('manualBookmarks', Array.from(this.state.manualMarks));
+    }
+
+    findItemByBookmarkId(bookmarkId) {
+      return this.cache.items.find((item) => item.bookmarkId === bookmarkId) || null;
+    }
+
+    removeItemByBookmarkId(bookmarkId) {
+      const index = this.cache.items.findIndex((item) => item.bookmarkId === bookmarkId);
+      if (index === -1) return false;
+
+      const [item] = this.cache.items.splice(index, 1);
+      this.cache.keySet.delete(item.key);
+      this.cache.key2item.delete(item.key);
+      const targetNode = this.getItemTargetNode(item);
+      if (targetNode) this.cache.node2key.delete(targetNode);
+      if (this.state.activeKey === item.key) this.state.activeKey = '';
+      this.cache.items.forEach((entry, idx) => {
+        entry.idx = idx + 1;
+      });
+      this._renderedCount = Math.min(this._renderedCount, this.cache.items.length);
+      return true;
+    }
+
+    isAssistantBookmarkActive(node) {
+      const txt = Utils.fastText(node);
+      if (!txt) return false;
+      const anchor = this.makeKeyAndAnchor(node, txt);
+      const bookmarkId = this.makeBookmarkId(anchor, txt);
+      return this.state.manualMarks.has(bookmarkId);
+    }
+
+    toggleAssistantBookmark(node) {
+      const txt = Utils.fastText(node);
+      if (!txt) return;
+
+      const anchor = this.makeKeyAndAnchor(node, txt);
+      const bookmarkId = this.makeBookmarkId(anchor, txt);
+      const exists = this.state.manualMarks.has(bookmarkId);
+
+      if (exists) {
+        this.state.manualMarks.delete(bookmarkId);
+        this.state.marks.delete(bookmarkId);
+        this.removeItemByBookmarkId(bookmarkId);
+        Utils.toast(this.t('content_ai_bookmark_removed'));
+      } else {
+        this.registerMessageNode(node);
+        this.state.manualMarks.add(bookmarkId);
+        this.state.marks.add(bookmarkId);
+        Utils.toast(this.t('content_ai_bookmark_added'));
+      }
+
+      this.persistMarks();
+      this.syncInlineBookmarkButtons();
+      this.renderListFull();
+    }
+
+    getBookmarkButtonHost(node) {
+      return node.closest('[data-message-id]') || node.closest('article') || node.parentElement || node;
+    }
+
+    syncInlineBookmarkButtons() {
+      const assistantNodes = this.getAllMessageNodes('assistant');
+      assistantNodes.forEach((node) => {
+        const host = this.getBookmarkButtonHost(node);
+        if (!(host instanceof HTMLElement)) return;
+        host.classList.add('ai-msg-bookmark-host');
+
+        let btn = host.querySelector(':scope > .ai-msg-bookmark-btn');
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ai-msg-bookmark-btn';
+          btn.textContent = '✦';
+          host.appendChild(btn);
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.toggleAssistantBookmark(node);
+          });
+        }
+
+        const active = this.isAssistantBookmarkActive(node);
+        btn.classList.toggle('active', active);
+        const title = active ? this.t('content_ai_remove_bookmark') : this.t('content_ai_add_bookmark');
+        btn.title = title;
+        btn.setAttribute('aria-label', title);
+      });
+    }
+
     registerMessageNode(node) {
       if (this.cache.node2key.has(node)) return false;
 
@@ -950,9 +1091,13 @@
 
       const lower = txt.toLowerCase();
       const preview = txt.length > CFG.len ? (txt.slice(0, CFG.len) + '..') : txt;
+      const role = node.getAttribute('data-message-author-role') || 'unknown';
+      const bookmarkId = this.makeBookmarkId({ key, kind, val, weak }, txt);
 
       const it = {
         key, kind, val, weak,
+        bookmarkId,
+        role,
         hash: Utils.hash32(txt),
         txt, lower, preview,
         idx: this.cache.items.length + 1,
@@ -969,9 +1114,12 @@
         if (drop) {
           this.cache.keySet.delete(drop.key);
           this.cache.key2item.delete(drop.key);
-          if (this.state.marks.has(drop.key)) {
-            this.state.marks.delete(drop.key);
-            Utils.storage.set('bookmarks', Array.from(this.state.marks));
+          if (drop.role !== 'user') {
+            this.state.manualMarks.delete(drop.bookmarkId);
+          }
+          if (this.state.marks.has(drop.bookmarkId)) {
+            this.state.marks.delete(drop.bookmarkId);
+            this.persistMarks();
           }
           if (this.state.activeKey === drop.key) this.state.activeKey = '';
           this._renderedCount = Math.max(0, this._renderedCount - 1);
@@ -982,9 +1130,23 @@
     }
 
     fullRescan() {
-      const root = this.chatRoot || this.findChatRoot();
-      const nodes = root ? Array.from(root.querySelectorAll(this.getSelectors())) : [];
-      for (const n of nodes) this.registerMessageNode(n);
+      const nodes = this.getAllMessageNodes();
+      for (const node of nodes) {
+        const role = node.getAttribute('data-message-author-role');
+        if (role === 'user') {
+          this.registerMessageNode(node);
+          continue;
+        }
+        if (role !== 'assistant') continue;
+        const txt = Utils.fastText(node);
+        if (!txt) continue;
+        const anchor = this.makeKeyAndAnchor(node, txt);
+        const bookmarkId = this.makeBookmarkId(anchor, txt);
+        if (this.state.manualMarks.has(bookmarkId)) {
+          this.registerMessageNode(node);
+        }
+      }
+      this.syncInlineBookmarkButtons();
       this.renderListFull();
     }
 
@@ -1000,7 +1162,7 @@
 
     buildItemEl(it) {
       const item = document.createElement('div');
-      item.className = 'ai-item' + (this.state.marks.has(it.key) ? ' mark' : '');
+      item.className = 'ai-item' + (this.state.marks.has(it.bookmarkId) ? ' mark' : '');
       if (this.state.activeKey === it.key) item.classList.add('active');
       item.title = it.txt;
       item.dataset.key = it.key;
@@ -1012,10 +1174,14 @@
       const star = document.createElement('span');
       star.className = 'ai-star';
       star.textContent = '✦';
+      star.title = this.t('content_toggle_bookmark');
+      star.setAttribute('aria-label', this.t('content_toggle_bookmark'));
 
       const label = document.createElement('span');
       label.className = 'ai-txt';
-      label.textContent = it.preview;
+      label.textContent = it.role === 'assistant'
+        ? `${this.t('content_assistant_prefix')} · ${it.preview}`
+        : it.preview;
 
       item.append(num, star, label);
       return item;
@@ -1036,7 +1202,7 @@
 
       if (!target) {
         const root = this.chatRoot || document.querySelector('main') || document.body;
-        const nodes = root.querySelectorAll(this.getSelectors());
+        const nodes = root.querySelectorAll('div[data-message-author-role]');
         for (const n of nodes) {
           const t = Utils.fastText(n);
           if (!t) continue;
@@ -1055,7 +1221,7 @@
       const items = this.cache.items;
 
       if (!items.length) {
-        this.renderEmpty('等待对话...');
+        this.renderEmpty(this.t('content_waiting'));
         return;
       }
 
@@ -1073,7 +1239,7 @@
       }
 
       if (!shown) {
-        this.renderEmpty(kw ? '未匹配到内容' : '等待对话...');
+        this.renderEmpty(kw ? this.t('content_no_match') : this.t('content_waiting'));
         return;
       }
 
@@ -1147,6 +1313,39 @@
       }
     }
 
+    scrollSidebarOrPage(edge) {
+      const body = this.dom.body;
+      const top = edge === 'top' ? 0 : Math.max(0, (body?.scrollHeight || 0) - (body?.clientHeight || 0));
+      const canScrollBody = !!body && body.scrollHeight > body.clientHeight + 4;
+
+      if (canScrollBody) {
+        try {
+          body.scrollTo({ top, behavior: 'smooth' });
+        } catch {
+          body.scrollTop = top;
+        }
+
+        requestAnimationFrame(() => {
+          if (body) body.scrollTop = top;
+        });
+        return;
+      }
+
+      const pageTop = edge === 'top'
+        ? 0
+        : Math.max(
+          document.documentElement.scrollHeight,
+          document.body?.scrollHeight || 0,
+          this.chatRoot?.scrollHeight || 0
+        );
+
+      try {
+        window.scrollTo({ top: pageTop, behavior: 'smooth' });
+      } catch {
+        window.scrollTo(0, pageTop);
+      }
+    }
+
     toggleCollapse() {
       this.state.isCollapsed = !this.state.isCollapsed;
       this.dom.root.classList.toggle('ai-hide');
@@ -1155,20 +1354,14 @@
       Utils.storage.set('collapsed', this.state.isCollapsed);
     }
 
-    toggleWidth() {
-      const nextWidth = this.state.isWide ? CFG.minW : CFG.maxW;
-      this.applySidebarWidth(nextWidth, true);
-      this.syncTimelinePosition();
-    }
-
     handleExport(e) {
       e.stopPropagation();
       if (e.shiftKey) {
         const log = this.getChatLog();
-        if (!log) return Utils.toast('未检测到有效对话');
+        if (!log) return Utils.toast(this.t('content_no_chat'));
         navigator.clipboard.writeText(log)
-          .then(() => Utils.toast('完整对话已复制'))
-          .catch(() => Utils.toast('复制失败'));
+          .then(() => Utils.toast(this.t('content_full_chat_copied')))
+          .catch(() => Utils.toast(this.t('content_copy_failed')));
       } else {
         const kw = this.state.keyword;
         const list = this.cache.items
@@ -1176,8 +1369,8 @@
           .map(x => x.txt)
           .join('\n');
         navigator.clipboard.writeText(list || '')
-          .then(() => Utils.toast('目录已复制'))
-          .catch(() => Utils.toast('复制失败'));
+          .then(() => Utils.toast(this.t('content_outline_copied')))
+          .catch(() => Utils.toast(this.t('content_copy_failed')));
       }
     }
 
@@ -1186,12 +1379,13 @@
       const blocks = root.querySelectorAll('div[data-message-author-role]');
       if (!blocks.length) return null;
 
-      const log = [`=== 导出对话 (${new Date().toLocaleString()}) ===\n`];
+      const time = new Date().toLocaleString(this.state.language === 'en' ? 'en-US' : 'zh-CN');
+      const log = [this.t('content_export_header', { time })];
       blocks.forEach((b) => {
         const role = b.getAttribute('data-message-author-role');
         const t = Utils.fastText(b);
         if (!t) return;
-        log.push(`${role === 'user' ? '【User】' : '【AI】'}\n${t}\n-------------------`);
+        log.push(`${role === 'user' ? this.t('content_export_user') : this.t('content_export_ai')}\n${t}\n-------------------`);
       });
       return log.join('\n\n');
     }
@@ -1203,7 +1397,6 @@
     console.info('[AI TOC] content booted', {
       enabled: app.state.enabled,
       chatWidth: app.state.chatWidth,
-      sidebarWidth: app.state.sidebarWidth,
       url: location.href
     });
 
@@ -1211,7 +1404,7 @@
       if (areaName !== 'local') return;
 
       const chatWidthKey = `ai-toc-${NS}-chatWidth`;
-      const sidebarWidthKey = `ai-toc-${NS}-sidebarWidth`;
+      const languageKey = `ai-toc-${NS}-language`;
 
       if (changes[chatWidthKey]) {
         const nextWidth = app.normalizeChatWidth(changes[chatWidthKey].newValue);
@@ -1225,11 +1418,10 @@
         }
       }
 
-      if (changes[sidebarWidthKey]) {
-        const nextWidth = app.normalizeSidebarWidth(changes[sidebarWidthKey].newValue);
-        if (nextWidth !== app.state.sidebarWidth) {
-          app.applySidebarWidth(nextWidth, false);
-          app.syncTimelinePosition();
+      if (changes[languageKey]) {
+        const nextLanguage = app.normalizeLanguage(changes[languageKey].newValue);
+        if (nextLanguage !== app.state.language) {
+          app.setLanguage(nextLanguage, false);
         }
       }
     });
@@ -1243,7 +1435,7 @@
           if (app.dom.timeline) app.dom.timeline.style.display = '';
           app.resetForRoute();
           app.applyChatWidth(app.state.chatWidth, false, 'toggle-enabled');
-          app.applySidebarWidth(app.state.sidebarWidth);
+          app.applySidebarWidth();
           app.syncTimelinePosition();
         } else {
           if (app.dom.root) app.dom.root.style.display = 'none';
@@ -1265,10 +1457,6 @@
           appliedWidth: result.appliedWidth,
           targetCount: result.targetCount
         });
-      } else if (msg.type === 'set-sidebar-width') {
-        app.applySidebarWidth(msg.value, true);
-        app.syncTimelinePosition();
-        sendResponse({ sidebarWidth: app.state.sidebarWidth, isWide: app.state.isWide });
       } else if (msg.type === 'set-theme') {
         const appliedTheme = app.applyTheme(msg.value);
         Utils.storage.set('theme', appliedTheme);
@@ -1278,6 +1466,12 @@
           themes: app.themes.slice(),
           className: app.dom.root?.className || null,
           themeClasses: Array.from(app.dom.root?.classList || []).filter((name) => name.startsWith('theme-'))
+        });
+      } else if (msg.type === 'set-language') {
+        const appliedLanguage = app.setLanguage(msg.value, true);
+        sendResponse({
+          requestedLanguage: msg.value,
+          appliedLanguage
         });
       }
     });
