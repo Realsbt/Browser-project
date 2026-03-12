@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  color-scheme: dark;
+  --bg: #1f1f1f;
+  --panel: rgba(39, 39, 42, 0.96);
+  --card: rgba(255, 255, 255, 0.04);
+  --card-strong: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #ececec;
+  --muted: #a1a1aa;
+  --accent: #10a37f;
+  --accent-soft: rgba(16, 163, 127, 0.16);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #eef2f5;
+    --panel: rgba(255, 255, 255, 0.98);
+    --card: rgba(15, 23, 42, 0.035);
+    --card-strong: rgba(15, 23, 42, 0.05);
+    --border: rgba(15, 23, 42, 0.08);
+    --text: #111827;
+    --muted: #6b7280;
+    --accent: #10a37f;
+    --accent-soft: rgba(16, 163, 127, 0.12);
+    --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+  }
+}
+body {
+  width: 360px;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 12px;
+}
+.shell {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.header img {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+.header-text h1 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.header-text p {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.section {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.section:last-of-type {
+  margin-bottom: 0;
+}
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  gap: 12px;
+}
+.row-label {
+  font-size: 13px;
+}
+.toggle {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.toggle input {
+  display: none;
+}
+.toggle .slider {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  transition: .2s;
+}
+.toggle .slider::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 2px;
+  top: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: .2s;
+}
+.toggle input:checked + .slider {
+  background: var(--accent);
+}
+.toggle input:checked + .slider::before {
+  transform: translateX(16px);
+}
+.theme-btns {
+  display: flex;
+  gap: 8px;
+}
+.theme-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: .15s;
+}
+.theme-btn:hover {
+  background: var(--card-strong);
+}
+.theme-btn.active {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--text);
+}
+.range-card {
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--card-strong);
+}
+.range-card + .range-card {
+  margin-top: 8px;
+}
+.range-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+.range-label {
+  font-size: 13px;
+}
+.range-value {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 44px;
+  text-align: right;
+}
+.range-input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.range-tips {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.shortcuts {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.shortcuts kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--card-strong);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10px;
+}
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <img src="icons/icon48.png" alt="icon">
+      <div class="header-text">
+        <h1>ChatGPT 侧边导航栏</h1>
+        <p id="version"></p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">设置</div>
+      <div class="row">
+        <span class="row-label">启用侧边栏</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-enabled" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="row">
+        <span class="row-label">性能模式</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-fx">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">宽度</div>
+      <div class="range-card">
+        <div class="range-head">
+          <span class="range-label">主对话区宽度</span>
+          <span class="range-value" id="chat-width-value"></span>
+        </div>
+        <input class="range-input" type="range" id="chat-width" min="720" max="1440" step="20">
+        <div class="range-tips">
+          <span>紧凑</span>
+          <span>宽</span>
+        </div>
+      </div>
+      <div class="range-card">
+        <div class="range-head">
+          <span class="range-label">侧栏宽度</span>
+          <span class="range-value" id="sidebar-width-value"></span>
+        </div>
+        <input class="range-input" type="range" id="sidebar-width" min="188" max="288" step="4">
+        <div class="range-tips">
+          <span>窄</span>
+          <span>宽</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">主题</div>
+      <div class="theme-btns">
+        <button class="theme-btn" data-theme="light">浅色</button>
+        <button class="theme-btn" data-theme="dark">深色</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">快捷键</div>
+      <div class="shortcuts">
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 聚焦搜索框<br>
+        <kbd>Esc</kbd> 清空搜索 / 取消聚焦<br>
+        点击 ✦ 添加书签 · 右键复制消息
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
