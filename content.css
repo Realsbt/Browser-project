@@ -1,3 +1,45 @@
+#root,
+html {
+  --ai-toc-chat-width: 960px;
+  --thread-content-max-width: 960px;
+}
+
+main [class*="l-thread-content-max-width-"] {
+  --thread-content-max-width: var(--ai-toc-chat-width) !important;
+  width: min(100%, var(--ai-toc-chat-width)) !important;
+  max-width: var(--ai-toc-chat-width) !important;
+  min-width: 0 !important;
+  flex: 0 0 auto !important;
+  align-self: stretch !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+main [class*="l-thread-content-max-width-"] > *,
+main [class*="l-thread-content-max-width-"] > * > * {
+  min-width: 0 !important;
+}
+
+main [class*="l-thread-content-max-width-"] > [class*="max-w-full"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+main [class*="l-thread-content-max-width-"] [class*="text-message"],
+main [class*="l-thread-content-max-width-"] .text-message,
+main [class*="l-thread-content-max-width-"] [data-message-author-role],
+main [class*="l-thread-content-max-width-"] [class*="max-w-full"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+main [class*="l-thread-content-max-width-"] [class*="text-message"] > *,
+main [class*="l-thread-content-max-width-"] .text-message > * {
+  max-width: 100% !important;
+}
+
 #ai-toc,
 #ai-timeline {
   --at-bg: rgba(255, 255, 255, 0.9);

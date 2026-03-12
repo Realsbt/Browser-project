@@ -93,9 +93,6 @@
   class SideNavGPT {
     constructor(stored) {
       this.themes = ['light', 'dark'];
-      // #region agent log
-      fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'767ac1'},body:JSON.stringify({sessionId:'767ac1',runId:'initial-debug',hypothesisId:'H3',location:'content.js:86',message:'content app constructed',data:{storedTheme:stored.theme,themes:this.themes.slice()},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
 
       this.cache = {
         items: [],
@@ -316,71 +313,239 @@
       rail.style.display = '';
     }
 
+    getClassNameText(el) {
+      if (!el) return '';
+      if (typeof el.className === 'string') return el.className;
+      if (el.className && typeof el.className.baseVal === 'string') return el.className.baseVal;
+      return String(el.className || '');
+    }
+
+    isChatWidthCandidate(el, mainRect) {
+      if (!(el instanceof HTMLElement)) return false;
+
+      const rect = el.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+
+      const style = window.getComputedStyle(el);
+      const className = this.getClassNameText(el);
+      const hasMaxWidth = !!style.maxWidth && style.maxWidth !== 'none' && style.maxWidth !== 'max-content';
+      const hasWidthHint =
+        /\bmax-w-[^\s]+\b/.test(className) ||
+        className.includes('max-w[') ||
+        /\bmx-auto\b/.test(className) ||
+        /\bw-full\b/.test(className) ||
+        /\bself-center\b/.test(className);
+
+      const mainCenter = mainRect.left + mainRect.width / 2;
+      const rectCenter = rect.left + rect.width / 2;
+      const centered = Math.abs(rectCenter - mainCenter) <= 40;
+      const widthDelta = mainRect.width - rect.width;
+      const looksConstrained =
+        widthDelta >= 32 &&
+        rect.width >= Math.min(320, mainRect.width * 0.35);
+
+      return hasMaxWidth || (centered && looksConstrained) || (hasWidthHint && centered);
+    }
+
     findChatWidthTargets() {
       const main = document.querySelector('main');
-      const message = main?.querySelector('div[data-message-author-role]');
-      if (!main || !message) return [];
+      const messages = main ? Array.from(main.querySelectorAll('div[data-message-author-role]')).slice(0, 8) : [];
+      if (!main || !messages.length) return [];
 
-      const targets = [];
-      let outer = null;
-      let current = message.parentElement;
-
-      while (current && current !== main) {
-        if (current.querySelectorAll && current.querySelectorAll('div[data-message-author-role]').length >= 2) {
-          outer = current;
-        }
-        current = current.parentElement;
-      }
-
-      const log = message.closest('[role="log"]');
-      const section = message.closest('section');
-
-      const push = (el) => {
-        if (!el || el === main || targets.includes(el)) return;
-        targets.push(el);
+      const directTargets = Array.from(main.querySelectorAll('[class*="l-thread-content-max-width-"]'))
+        .filter((el) => el instanceof HTMLElement);
+      const mainRect = main.getBoundingClientRect();
+      const mergedTargets = [];
+      const pushTarget = (el) => {
+        if (!el || el === main || !(el instanceof HTMLElement) || mergedTargets.includes(el)) return;
+        mergedTargets.push(el);
       };
 
-      push(outer);
-      push(log);
-      push(section);
+      directTargets.forEach(pushTarget);
 
-      // #region agent log
-      fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6155d5'},body:JSON.stringify({sessionId:'6155d5',runId:'initial-debug',hypothesisId:'H2',location:'content.js:319',message:'chat width targets resolved',data:{hasMain:!!main,hasMessage:!!message,targetCount:targets.length,targets:targets.map((el)=>({tag:el.tagName,className:(el.className||'').toString().slice(0,160),width:Math.round(el.getBoundingClientRect().width)}))},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+      messages.forEach((message) => {
+        let current = message;
+        let depth = 0;
+        while (current && current !== main && depth < 10) {
+          if (current instanceof HTMLElement) {
+            const rect = current.getBoundingClientRect();
+            const style = window.getComputedStyle(current);
+            const isNarrowerThanMain = rect.width > 0 && rect.width <= mainRect.width - 24;
+            const hasWidthConstraint = style.maxWidth !== 'none' || style.width !== 'auto';
+            if (isNarrowerThanMain || hasWidthConstraint) {
+              pushTarget(current);
+            }
+          }
+          current = current.parentElement;
+          depth++;
+        }
+      });
+
+      if (mergedTargets.length) {
+        return mergedTargets;
+      }
+
+      const counts = new Map();
+      const scored = new Map();
+
+      const bumpScore = (el, score) => {
+        if (!el || el === main || !(el instanceof HTMLElement)) return;
+        const prev = scored.get(el) || 0;
+        if (score > prev) scored.set(el, score);
+      };
+
+      const chains = messages.map((message) => {
+        const chain = [];
+        let current = message;
+        while (current && current !== main) {
+          if (current instanceof HTMLElement) {
+            chain.push(current);
+            counts.set(current, (counts.get(current) || 0) + 1);
+          }
+          current = current.parentElement;
+        }
+        return chain;
+      });
+
+      chains.forEach((chain) => {
+        chain.forEach((el) => {
+          if (!this.isChatWidthCandidate(el, mainRect)) return;
+
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          const widthDelta = mainRect.width - rect.width;
+          const count = counts.get(el) || 0;
+          let score = 0;
+
+          if (count >= 2) score += 6;
+          if (style.maxWidth && style.maxWidth !== 'none') score += 3;
+          if (widthDelta >= 64) score += 2;
+          if (widthDelta >= 120) score += 2;
+
+          bumpScore(el, score);
+        });
+      });
+
+      const firstMessage = messages[0];
+      bumpScore(firstMessage?.closest('article'), 8);
+      bumpScore(firstMessage?.closest('[role="log"]'), 7);
+      bumpScore(firstMessage?.closest('section'), 5);
+
+      const targets = Array.from(scored.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([el]) => el)
+        .slice(0, 16);
+
       return targets;
+    }
+
+    getLiveChatWidthTargets() {
+      const targets = (this.chatWidthTargets || []).filter((el) => el instanceof HTMLElement && el.isConnected);
+      return targets.length ? targets : this.findChatWidthTargets();
     }
 
     applyChatWidth(width, persist = false, source = 'unknown') {
       const normalizedWidth = this.normalizeChatWidth(width);
-      const targets = this.findChatWidthTargets();
+      document.documentElement.style.setProperty('--ai-toc-chat-width', `${normalizedWidth}px`);
+      document.documentElement.style.setProperty('--thread-content-max-width', `${normalizedWidth}px`);
+      const shouldReuseTargets =
+        source === 'preview-chat-width' ||
+        source === 'message:set-chat-width' ||
+        source === 'storage:onChanged';
+      const targets = shouldReuseTargets ? this.getLiveChatWidthTargets() : this.findChatWidthTargets();
       const prevTargets = this.chatWidthTargets || [];
 
       prevTargets.forEach((el) => {
         if (!targets.includes(el)) {
+          el.style.removeProperty('--thread-content-max-width');
           el.style.removeProperty('max-width');
           el.style.removeProperty('width');
+          el.style.removeProperty('min-width');
+          el.style.removeProperty('flex-basis');
           el.style.removeProperty('margin-left');
           el.style.removeProperty('margin-right');
+          const firstChild = el.firstElementChild;
+          if (firstChild instanceof HTMLElement) {
+            firstChild.style.removeProperty('width');
+            firstChild.style.removeProperty('max-width');
+            firstChild.style.removeProperty('min-width');
+          }
         }
       });
 
       targets.forEach((el) => {
-        el.style.setProperty('max-width', `min(${normalizedWidth}px, calc(100vw - 96px))`);
-        el.style.setProperty('width', '100%');
-        el.style.setProperty('margin-left', 'auto');
-        el.style.setProperty('margin-right', 'auto');
+        el.style.setProperty('--thread-content-max-width', `${normalizedWidth}px`, 'important');
+        el.style.setProperty('max-width', `${normalizedWidth}px`, 'important');
+        el.style.setProperty('width', `min(100%, ${normalizedWidth}px)`, 'important');
+        el.style.setProperty('min-width', '0', 'important');
+        el.style.setProperty('flex', '0 0 auto', 'important');
+        el.style.setProperty('flex-basis', 'auto', 'important');
+        el.style.setProperty('align-self', 'stretch', 'important');
+        el.style.setProperty('margin-left', 'auto', 'important');
+        el.style.setProperty('margin-right', 'auto', 'important');
+
+        const firstChild = el.firstElementChild;
+        if (firstChild instanceof HTMLElement) {
+          firstChild.style.setProperty('width', '100%', 'important');
+          firstChild.style.setProperty('max-width', '100%', 'important');
+          firstChild.style.setProperty('min-width', '0', 'important');
+        }
+
+        const innerTargets = el.querySelectorAll('[class*="text-message"], .text-message, [data-message-author-role], [class*="max-w-full"]');
+        innerTargets.forEach((inner) => {
+          if (!(inner instanceof HTMLElement)) return;
+          inner.style.setProperty('width', '100%', 'important');
+          inner.style.setProperty('max-width', '100%', 'important');
+          inner.style.setProperty('min-width', '0', 'important');
+        });
       });
 
       this.chatWidthTargets = targets;
       this.state.chatWidth = normalizedWidth;
+      const appliedWidth = targets.length
+        ? Math.round(Math.max(...targets.map((el) => el.getBoundingClientRect().width)))
+        : 0;
 
-      // #region agent log
-      fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6155d5'},body:JSON.stringify({sessionId:'6155d5',runId:'initial-debug',hypothesisId:'H3',location:'content.js:350',message:'apply chat width result',data:{source,persist,requestedWidth:width,normalizedWidth,targetCount:targets.length,targets:targets.map((el)=>({tag:el.tagName,className:(el.className||'').toString().slice(0,160),styleMaxWidth:el.style.maxWidth || null,styleWidth:el.style.width || null,rectWidth:Math.round(el.getBoundingClientRect().width)}))},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+      const isUserTriggered =
+        source === 'message:set-chat-width' ||
+        source === 'storage:onChanged';
+
+      if (isUserTriggered) {
+        if (targets.length) {
+          this.flashChatWidthTargets(targets);
+          if (appliedWidth > 0 && appliedWidth < normalizedWidth - 12) {
+            Utils.toast(`主对话区 ${appliedWidth}px（已达页面上限）`);
+          } else {
+            Utils.toast(`主对话区宽度 ${normalizedWidth}px`);
+          }
+        } else {
+          Utils.toast('未找到主对话区容器');
+        }
+      }
+
+      if (source !== 'observer:anyNew' && source !== 'observer:layoutRefresh') {
+        console.info('[AI TOC] applyChatWidth', {
+          source,
+          width: normalizedWidth,
+          targetCount: targets.length,
+          targets: targets.slice(0, 5).map((el) => ({
+            tag: el.tagName,
+            className: this.getClassNameText(el).slice(0, 160),
+            width: Math.round(el.getBoundingClientRect().width),
+            maxWidth: window.getComputedStyle(el).maxWidth
+          }))
+        });
+      }
 
       if (persist) {
         Utils.storage.set('chatWidth', normalizedWidth);
       }
+
+      return {
+        requestedWidth: normalizedWidth,
+        appliedWidth,
+        targetCount: targets.length
+      };
     }
 
     applySidebarWidth(width, persist = false) {
@@ -400,6 +565,20 @@
         Utils.storage.set('sidebarWidth', normalizedWidth);
         Utils.storage.set('wide', this.state.isWide);
       }
+    }
+
+    flashChatWidthTargets(targets) {
+      targets.forEach((el) => {
+        el.style.setProperty('outline', '2px dashed #10a37f', 'important');
+        el.style.setProperty('outline-offset', '4px', 'important');
+      });
+
+      window.setTimeout(() => {
+        targets.forEach((el) => {
+          el.style.removeProperty('outline');
+          el.style.removeProperty('outline-offset');
+        });
+      }, 900);
     }
 
     scheduleTimelineRefresh() {
@@ -1021,6 +1200,39 @@
   Utils.storage.getAll().then((stored) => {
     const app = new SideNavGPT(stored);
     app.init();
+    console.info('[AI TOC] content booted', {
+      enabled: app.state.enabled,
+      chatWidth: app.state.chatWidth,
+      sidebarWidth: app.state.sidebarWidth,
+      url: location.href
+    });
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') return;
+
+      const chatWidthKey = `ai-toc-${NS}-chatWidth`;
+      const sidebarWidthKey = `ai-toc-${NS}-sidebarWidth`;
+
+      if (changes[chatWidthKey]) {
+        const nextWidth = app.normalizeChatWidth(changes[chatWidthKey].newValue);
+        console.info('[AI TOC] storage chatWidth changed', {
+          oldValue: changes[chatWidthKey].oldValue,
+          newValue: changes[chatWidthKey].newValue,
+          normalized: nextWidth
+        });
+        if (nextWidth !== app.state.chatWidth) {
+          app.applyChatWidth(nextWidth, false, 'storage:onChanged');
+        }
+      }
+
+      if (changes[sidebarWidthKey]) {
+        const nextWidth = app.normalizeSidebarWidth(changes[sidebarWidthKey].newValue);
+        if (nextWidth !== app.state.sidebarWidth) {
+          app.applySidebarWidth(nextWidth, false);
+          app.syncTimelinePosition();
+        }
+      }
+    });
 
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg.type === 'toggle-enabled') {
@@ -1043,25 +1255,23 @@
         app.state.reduceFx = msg.value;
         app.dom.root.classList.toggle('fx-off', msg.value);
         app.dom.timeline?.classList.toggle('fx-off', msg.value);
+      } else if (msg.type === 'preview-chat-width') {
+        const result = app.applyChatWidth(msg.value, false, 'preview-chat-width');
+        sendResponse(result);
       } else if (msg.type === 'set-chat-width') {
-        // #region agent log
-        fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6155d5'},body:JSON.stringify({sessionId:'6155d5',runId:'initial-debug',hypothesisId:'H1',location:'content.js:1039',message:'set-chat-width message received',data:{requestedValue:msg.value,currentChatWidth:app.state.chatWidth,enabled:app.state.enabled},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        app.applyChatWidth(msg.value, true, 'message:set-chat-width');
-        sendResponse({ chatWidth: app.state.chatWidth });
+        const result = app.applyChatWidth(msg.value, true, 'message:set-chat-width');
+        sendResponse({
+          chatWidth: app.state.chatWidth,
+          appliedWidth: result.appliedWidth,
+          targetCount: result.targetCount
+        });
       } else if (msg.type === 'set-sidebar-width') {
         app.applySidebarWidth(msg.value, true);
         app.syncTimelinePosition();
         sendResponse({ sidebarWidth: app.state.sidebarWidth, isWide: app.state.isWide });
       } else if (msg.type === 'set-theme') {
-        // #region agent log
-        fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'767ac1'},body:JSON.stringify({sessionId:'767ac1',runId:'initial-debug',hypothesisId:'H3',location:'content.js:656',message:'before applying theme',data:{requestedTheme:msg.value,themes:app.themes.slice(),className:app.dom.root?.className || null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const appliedTheme = app.applyTheme(msg.value);
         Utils.storage.set('theme', appliedTheme);
-        // #region agent log
-        fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'767ac1'},body:JSON.stringify({sessionId:'767ac1',runId:'initial-debug',hypothesisId:'H4',location:'content.js:659',message:'after applying theme',data:{requestedTheme:msg.value,className:app.dom.root?.className || null,themeClasses:Array.from(app.dom.root?.classList || []).filter((name)=>name.startsWith('theme-'))},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         sendResponse({
           requestedTheme: msg.value,
           appliedTheme,

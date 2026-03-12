@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT侧边目录导航栏",
-  "version": "91.78",
+  "version": "13.147",
   "description": "ChatGPT:侧边目录/书签/搜索/导出。弱引用/限量渲染，性能优秀。",
   "permissions": ["storage"],
   "action": {

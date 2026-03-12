@@ -1,20 +1,28 @@
 // ==UserScript==
-// @version      91.78
-// @description  ChatGPT:侧边目录/书签/搜索/导出。弱引用/限量渲染，性能优秀。
-// @author       realsbt
+// @name        ChatGPT对话侧边导航栏 
+// @namespace    http://tampermonkey.net/
+// @version      9.1
+// @description  ChatGPT 专用：侧边目录/书签/搜索/导出。性能：不再强引用消息节点（避免越聊越卡），新消息只“增量追加”列表，列表渲染限量，点击再定位滚动。
+// @author       Realsbt
+// @license      MIT
 // @match        https://chatgpt.com/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @run-at       document-idle
 // ==/UserScript==
 
 (function () {
   'use strict';
-  if (window.__AI_TOC_GPT__) return;
-  window.__AI_TOC_GPT__ = true;
+  if (window.__AI_TOC_GPT_US__) return;
+  window.__AI_TOC_GPT_US__ = true;
 
-  const NS = 'gpt';
+  const NS = 'gpt-us';
   const CFG = {
-    symbol: '⌬',
+    symbol: 'US',
     minW: 200,
     maxW: 320,
+    chatDefaultW: 960,
+    chatWidths: [768, 960, 1120, 1280, 1440],
     len: 18,
     MAX_CACHE: 3000,     // 缓存上限（用于目录/搜索/复制目录）
     MAX_RENDER: 1200,    // 列表渲染上限（只渲染最近 N 条，避免 DOM 太大）
@@ -93,6 +101,9 @@
         marks: new Set(Utils.storage.get('bookmarks', [])),
         isCollapsed: Utils.storage.get('collapsed', false),
         isWide: Utils.storage.get('wide', false),
+        chatWidth: CFG.chatWidths.includes(Utils.storage.get('chatWidth', CFG.chatDefaultW))
+          ? Utils.storage.get('chatWidth', CFG.chatDefaultW)
+          : CFG.chatDefaultW,
         pos: Utils.storage.get('pos', { x: -1, y: 100 }),
         theme: Utils.storage.get('theme', 'auto'),
         keyword: '',
@@ -136,46 +147,131 @@
       return main;
     }
 
+    normalizeChatWidth(width) {
+      const n = Number(width);
+      if (!Number.isFinite(n)) return CFG.chatDefaultW;
+      let nearest = CFG.chatWidths[0];
+      let minDelta = Math.abs(nearest - n);
+      for (const candidate of CFG.chatWidths) {
+        const delta = Math.abs(candidate - n);
+        if (delta < minDelta) {
+          nearest = candidate;
+          minDelta = delta;
+        }
+      }
+      return nearest;
+    }
+
+    findChatWidthTargets() {
+      const main = document.querySelector('main');
+      if (!main) return [];
+
+      const direct = Array.from(main.querySelectorAll('[class*="l-thread-content-max-width-"]'));
+      if (direct.length) return direct;
+
+      const firstMessage = main.querySelector('div[data-message-author-role]');
+      if (!firstMessage) return [];
+
+      const targets = [];
+      let current = firstMessage.parentElement;
+      while (current && current !== main) {
+        const className = String(current.className || '');
+        const style = getComputedStyle(current);
+        if (
+          className.includes('max-w') ||
+          (style.maxWidth && style.maxWidth !== 'none')
+        ) {
+          targets.push(current);
+        }
+        current = current.parentElement;
+      }
+      return targets;
+    }
+
+    applyChatWidth(width, persist = false) {
+      const normalized = this.normalizeChatWidth(width);
+      document.documentElement.style.setProperty('--ai-chat-width', `${normalized}px`);
+      document.documentElement.style.setProperty('--thread-content-max-width', `${normalized}px`);
+
+      const targets = this.findChatWidthTargets();
+      targets.forEach((el) => {
+        el.style.setProperty('--thread-content-max-width', `${normalized}px`, 'important');
+        el.style.setProperty('width', `min(100%, ${normalized}px)`, 'important');
+        el.style.setProperty('max-width', `min(${normalized}px, calc(100vw - 96px))`, 'important');
+        el.style.setProperty('min-width', '0', 'important');
+        el.style.setProperty('flex', '0 1 auto', 'important');
+        el.style.setProperty('margin-left', 'auto', 'important');
+        el.style.setProperty('margin-right', 'auto', 'important');
+
+        const firstChild = el.firstElementChild;
+        if (firstChild instanceof HTMLElement) {
+          firstChild.style.setProperty('width', '100%', 'important');
+          firstChild.style.setProperty('max-width', '100%', 'important');
+          firstChild.style.setProperty('min-width', '0', 'important');
+        }
+      });
+
+      this.state.chatWidth = normalized;
+      if (this.dom.btnChatWidth) {
+        this.dom.btnChatWidth.title = `主对话区宽度：${normalized}px`;
+      }
+      if (persist) Utils.storage.set('chatWidth', normalized);
+    }
+
     injectCSS() {
       const css = `
-#ai-toc{
+html{ --ai-chat-width:${this.state.chatWidth}px; }
+main [class*="l-thread-content-max-width-"]{
+  width:min(100%, var(--ai-chat-width)) !important;
+  max-width:min(var(--ai-chat-width), calc(100vw - 96px)) !important;
+  min-width:0 !important;
+  flex:0 1 auto !important;
+  margin-left:auto !important;
+  margin-right:auto !important;
+}
+main [class*="l-thread-content-max-width-"] > [class*="max-w-full"]{
+  width:100% !important;
+  max-width:100% !important;
+  min-width:0 !important;
+}
+#ai-toc-us{
   --at-bg: rgba(255,255,255,.85); --at-bd:#e2e8f0; --at-txt:#334155;
   --at-h-bg:rgba(248,250,252,.6); --at-h-txt:#3b82f6; --at-act:#3b82f6; --at-shd:0 8px 32px rgba(0,0,0,.08);
   --at-s-off:#cbd5e1; --at-s-on:#f59e0b; --at-hover:rgba(0,0,0,.05);
 }
 @media (prefers-color-scheme: dark){
-  #ai-toc{
+  #ai-toc-us{
     --at-bg: rgba(28,25,23,.85); --at-bd:#f59e0b; --at-txt:#fef3c7;
     --at-h-bg:rgba(28,25,23,.6); --at-h-txt:#f59e0b; --at-act:#d97706; --at-shd:0 8px 32px rgba(0,0,0,.42);
     --at-s-off:#57534e; --at-s-on:#f59e0b; --at-hover:rgba(255,255,255,.08);
   }
 }
-#ai-toc.theme-pink{
+#ai-toc-us.theme-pink{
   --at-bg: rgba(255,245,247,.85)!important; --at-bd:#fbcfe8!important; --at-txt:#831843!important;
   --at-h-bg:rgba(252,231,243,.6)!important; --at-h-txt:#db2777!important; --at-act:#ec4899!important;
   --at-shd:0 8px 32px rgba(236,72,153,.24)!important; --at-s-off:#f9a8d4!important; --at-s-on:#be185d!important;
 }
-#ai-toc.theme-blue{
+#ai-toc-us.theme-blue{
   --at-bg: rgba(240,249,255,.85)!important; --at-bd:#bae6fd!important; --at-txt:#0c4a6e!important;
   --at-h-bg:rgba(224,242,254,.6)!important; --at-h-txt:#0284c7!important; --at-act:#0ea5e9!important;
   --at-shd:0 8px 32px rgba(14,165,233,.22)!important; --at-s-off:#7dd3fc!important; --at-s-on:#0369a1!important;
 }
-#ai-toc.theme-green{
+#ai-toc-us.theme-green{
   --at-bg: rgba(240,253,244,.85)!important; --at-bd:#bbf7d0!important; --at-txt:#14532d!important;
   --at-h-bg:rgba(220,252,231,.6)!important; --at-h-txt:#16a34a!important; --at-act:#22c55e!important;
   --at-shd:0 8px 32px rgba(34,197,94,.22)!important; --at-s-off:#86efac!important; --at-s-on:#15803d!important;
 }
-#ai-toc.theme-purple{
+#ai-toc-us.theme-purple{
   --at-bg: rgba(250,245,255,.85)!important; --at-bd:#e9d5ff!important; --at-txt:#581c87!important;
   --at-h-bg:rgba(243,232,255,.6)!important; --at-h-txt:#9333ea!important; --at-act:#a855f7!important;
   --at-shd:0 8px 32px rgba(168,85,247,.22)!important; --at-s-off:#d8b4fe!important; --at-s-on:#7e22ce!important;
 }
-#ai-toc.theme-orange{
+#ai-toc-us.theme-orange{
   --at-bg: rgba(255,247,237,.85)!important; --at-bd:#fed7aa!important; --at-txt:#7c2d12!important;
   --at-h-bg:rgba(255,237,213,.6)!important; --at-h-txt:#ea580c!important; --at-act:#f97316!important;
   --at-shd:0 8px 32px rgba(249,115,22,.22)!important; --at-s-off:#fdba74!important; --at-s-on:#c2410c!important;
 }
-#ai-toc{
+#ai-toc-us{
   position:fixed; z-index:9999; display:flex; flex-direction:column;
   background:var(--at-bg); border:1px solid var(--at-bd); color:var(--at-txt);
   border-radius:16px; box-shadow:var(--at-shd);
@@ -185,28 +281,28 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
-#ai-toc.fx-off{ backdrop-filter:none !important; -webkit-backdrop-filter:none !important; box-shadow:none !important; }
-#ai-head,#ai-foot{
+#ai-toc-us.fx-off{ backdrop-filter:none !important; -webkit-backdrop-filter:none !important; box-shadow:none !important; }
+#ai-head-us,#ai-foot-us{
   padding:10px 12px; cursor:move; display:flex; justify-content:space-between; align-items:center;
   flex-shrink:0; user-select:none;
 }
-#ai-head{ border-bottom:1px solid var(--at-bd); background:var(--at-h-bg); border-radius:16px 16px 0 0; }
-#ai-foot{ border-top:1px solid var(--at-bd); border-radius:0 0 16px 16px; font-size:12px; }
+#ai-head-us{ border-bottom:1px solid var(--at-bd); background:var(--at-h-bg); border-radius:16px 16px 0 0; }
+#ai-foot-us{ border-top:1px solid var(--at-bd); border-radius:0 0 16px 16px; font-size:12px; }
 .ai-title{ font-weight:700; font-size:16px; color:var(--at-h-txt); }
 .ai-ctrls{ display:flex; gap:8px; align-items:center; }
 .ai-btn{ cursor:pointer; opacity:.65; transition:.15s; font-size:14px; padding: 2px 6px; border-radius: 6px; }
 .ai-btn:hover{ opacity:1; transform:scale(1.06); color:var(--at-act); background:var(--at-hover); }
 
-#ai-search{
+#ai-search-us{
   margin:8px; padding:6px 12px; border:1px solid var(--at-bd); border-radius:8px;
   background:var(--at-hover); color:var(--at-txt); font-size:12px; outline:none; flex-shrink:0;
   transition: .2s;
 }
-#ai-search:focus{ border-color:var(--at-act); background:transparent; box-shadow: 0 0 0 2px rgba(59,130,246,.1); }
+#ai-search-us:focus{ border-color:var(--at-act); background:transparent; box-shadow: 0 0 0 2px rgba(59,130,246,.1); }
 
-#ai-body{ flex:1; overflow-y:auto; padding:4px 0; scrollbar-width:thin; min-height:0; }
-#ai-body::-webkit-scrollbar{ width:4px; }
-#ai-body::-webkit-scrollbar-thumb{ background:var(--at-bd); border-radius: 4px; }
+#ai-body-us{ flex:1; overflow-y:auto; padding:4px 0; scrollbar-width:thin; min-height:0; }
+#ai-body-us::-webkit-scrollbar{ width:4px; }
+#ai-body-us::-webkit-scrollbar-thumb{ background:var(--at-bd); border-radius: 4px; }
 
 .ai-item{
   padding:6px 8px 6px 4px; cursor:pointer; display:flex; align-items:center;
@@ -225,7 +321,7 @@
 
 .ai-wide{ width:${CFG.maxW}px !important; }
 .ai-norm{ width:${CFG.minW}px !important; }
-.ai-hide #ai-body,.ai-hide #ai-search,.ai-hide #ai-foot{ display:none; }
+.ai-hide #ai-body-us,.ai-hide #ai-search-us,.ai-hide #ai-foot-us{ display:none; }
 .ai-hide{ width:auto !important; height:auto !important; }
       `;
       const s = document.createElement('style');
@@ -241,25 +337,27 @@
         return el;
       };
 
-      this.dom.root = mk('div', this.state.isWide ? 'ai-wide' : 'ai-norm', { id: 'ai-toc' });
+      this.dom.root = mk('div', this.state.isWide ? 'ai-wide' : 'ai-norm', { id: 'ai-toc-us' });
+      this.dom.root.style.zIndex = '10050';
       if (this.state.isCollapsed) this.dom.root.classList.add('ai-hide');
       if (this.state.theme !== 'auto') this.dom.root.classList.add('theme-' + this.state.theme);
       if (this.state.reduceFx) this.dom.root.classList.add('fx-off');
 
-      const head = mk('div', '', { id: 'ai-head' });
+      const head = mk('div', '', { id: 'ai-head-us' });
       const title = mk('div', 'ai-title', { textContent: CFG.symbol });
 
       const ctrls = mk('div', 'ai-ctrls');
       const btnWide = mk('span', 'ai-btn', { textContent: '↔', title: '切换宽度' });
+      this.dom.btnChatWidth = mk('span', 'ai-btn', { textContent: '宽', title: `主对话区宽度：${this.state.chatWidth}px` });
       this.dom.btnFold = mk('span', 'ai-btn', { textContent: this.state.isCollapsed ? '◀' : '▼', title: '折叠/展开' });
 
-      ctrls.append(btnWide, this.dom.btnFold);
+      ctrls.append(btnWide, this.dom.btnChatWidth, this.dom.btnFold);
       head.append(title, ctrls);
 
-      this.dom.search = mk('input', '', { id: 'ai-search', placeholder: '搜索对话...', type: 'text' });
-      this.dom.body = mk('div', '', { id: 'ai-body' });
+      this.dom.search = mk('input', '', { id: 'ai-search-us', placeholder: '搜索对话...', type: 'text' });
+      this.dom.body = mk('div', '', { id: 'ai-body-us' });
 
-      const foot = mk('div', '', { id: 'ai-foot' });
+      const foot = mk('div', '', { id: 'ai-foot-us' });
       const jumpCtrls = mk('div', 'ai-ctrls');
       const btnTop = mk('span', 'ai-btn', { textContent: '⬆', title: '顶部' });
       const btnBot = mk('span', 'ai-btn', { textContent: '⬇', title: '底部' });
@@ -277,10 +375,11 @@
         this.dom.root.style.right = 'auto';
       } else {
         this.dom.root.style.top = '100px';
-        this.dom.root.style.right = '20px';
+        this.dom.root.style.right = '360px';
       }
 
       btnWide.onclick = () => this.toggleWidth();
+      this.dom.btnChatWidth.onclick = () => this.cycleChatWidth();
       this.dom.btnFold.onclick = () => this.toggleCollapse();
       btnTop.onclick = () => this.dom.body.scrollTo({ top: 0, behavior: 'smooth' });
       btnBot.onclick = () => this.dom.body.scrollTo({ top: this.dom.body.scrollHeight, behavior: 'smooth' });
@@ -329,15 +428,15 @@
       });
 
       const startDrag = (e) => {
-        if (e.target.closest('.ai-btn') || e.target.closest('#ai-search')) return;
+        if (e.target.closest('.ai-btn') || e.target.closest('#ai-search-us')) return;
         this.state.isDragging = true;
         this.state.offset.x = e.clientX - this.dom.root.offsetLeft;
         this.state.offset.y = e.clientY - this.dom.root.offsetTop;
         e.currentTarget.style.cursor = 'grabbing';
       };
 
-      const head = this.dom.root.querySelector('#ai-head');
-      const foot = this.dom.root.querySelector('#ai-foot');
+      const head = this.dom.root.querySelector('#ai-head-us');
+      const foot = this.dom.root.querySelector('#ai-foot-us');
       head.onmousedown = startDrag;
       foot.onmousedown = startDrag;
 
@@ -366,14 +465,14 @@
     }
 
     hookHistory() {
-      const fire = () => window.dispatchEvent(new Event('ai-toc:route'));
+      const fire = () => window.dispatchEvent(new Event('ai-toc-us:route'));
       const _push = history.pushState;
       history.pushState = function () { _push.apply(this, arguments); fire(); };
       const _rep = history.replaceState;
       history.replaceState = function () { _rep.apply(this, arguments); fire(); };
       window.addEventListener('popstate', fire);
 
-      window.addEventListener('ai-toc:route', Utils.debounce(() => {
+      window.addEventListener('ai-toc-us:route', Utils.debounce(() => {
         this.resetForRoute();
       }, 200));
     }
@@ -390,6 +489,7 @@
       this.chatRoot = this.findChatRoot();
       this.attachObserver();
       this.fullRescan();
+      this.applyChatWidth(this.state.chatWidth);
     }
 
     attachObserver() {
@@ -417,7 +517,10 @@
             }
           }
         }
-        if (anyNew) this.scheduleRender();
+        if (anyNew) {
+          this.applyChatWidth(this.state.chatWidth);
+          this.scheduleRender();
+        }
       };
 
       this.observer = new MutationObserver(onMutations);
@@ -647,6 +750,14 @@
       Utils.storage.set('wide', this.state.isWide);
     }
 
+    cycleChatWidth() {
+      const currentIndex = CFG.chatWidths.indexOf(this.state.chatWidth);
+      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % CFG.chatWidths.length;
+      const nextWidth = CFG.chatWidths[nextIndex];
+      this.applyChatWidth(nextWidth, true);
+      Utils.toast(`主对话区宽度 ${nextWidth}px`);
+    }
+
     handleExport(e) {
       e.stopPropagation();
       if (e.shiftKey) {
@@ -680,7 +791,10 @@
   }
 
   const app = new SideNavGPT();
-  const boot = () => app.init();
+  const boot = () => {
+    console.info('[AI TOC US] boot', { href: location.href, readyState: document.readyState });
+    app.init();
+  };
   if (document.readyState === 'complete' || document.readyState === 'interactive') boot();
   else window.addEventListener('DOMContentLoaded', boot, { once: true });
 })();

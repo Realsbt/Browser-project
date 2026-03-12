@@ -32,6 +32,8 @@ const syncThemeButtons = (theme) => {
     btn.classList.toggle('active', btn.dataset.theme === theme);
   });
 };
+let pendingChatWidthPreview = null;
+let chatWidthPreviewRAF = 0;
 
 chrome.storage.local.get(
   {
@@ -87,9 +89,6 @@ toggleFx.addEventListener('change', () => {
 themeBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
     const theme = normalizeTheme(btn.dataset.theme);
-    // #region agent log
-    fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'767ac1'},body:JSON.stringify({sessionId:'767ac1',runId:'initial-debug',hypothesisId:'H1',location:'popup.js:42',message:'theme button clicked',data:{theme,buttonCount:themeBtns.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     syncThemeButtons(theme);
     chrome.storage.local.set({ [key('theme')]: theme });
     notifyContentScript({ type: 'set-theme', value: theme });
@@ -100,11 +99,27 @@ chatWidthInput.addEventListener('input', () => {
   const value = normalizeChatWidth(chatWidthInput.value);
   chatWidthInput.value = String(value);
   renderWidthValue(chatWidthValue, value);
-  // #region agent log
-  fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6155d5'},body:JSON.stringify({sessionId:'6155d5',runId:'initial-debug',hypothesisId:'H1',location:'popup.js:99',message:'chat width slider input',data:{value,inputValue:chatWidthInput.value},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
+  pendingChatWidthPreview = value;
+  if (chatWidthPreviewRAF) return;
+  chatWidthPreviewRAF = requestAnimationFrame(() => {
+    chatWidthPreviewRAF = 0;
+    if (pendingChatWidthPreview == null) return;
+    notifyContentScript({ type: 'preview-chat-width', value: pendingChatWidthPreview });
+    pendingChatWidthPreview = null;
+  });
+});
+
+chatWidthInput.addEventListener('change', () => {
+  const value = normalizeChatWidth(chatWidthInput.value);
+  chatWidthInput.value = String(value);
+  renderWidthValue(chatWidthValue, value);
   chrome.storage.local.set({ [key('chatWidth')]: value });
-  notifyContentScript({ type: 'set-chat-width', value });
+  notifyContentScript({ type: 'set-chat-width', value }, (response) => {
+    const appliedWidth = Number(response?.appliedWidth);
+    if (Number.isFinite(appliedWidth) && appliedWidth > 0) {
+      renderWidthValue(chatWidthValue, appliedWidth);
+    }
+  });
 });
 
 sidebarWidthInput.addEventListener('input', () => {
@@ -118,33 +133,14 @@ sidebarWidthInput.addEventListener('input', () => {
   notifyContentScript({ type: 'set-sidebar-width', value });
 });
 
-function notifyContentScript(msg) {
+function notifyContentScript(msg, onResponse) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'767ac1'},body:JSON.stringify({sessionId:'767ac1',runId:'initial-debug',hypothesisId:'H2',location:'popup.js:52',message:'notify content script queried tabs',data:{msgType:msg?.type,msgValue:msg?.value,tabId:tabs[0]?.id ?? null,tabUrl:tabs[0]?.url ?? null,tabCount:tabs.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (tabs[0]?.id) {
       chrome.tabs.sendMessage(tabs[0].id, msg)
         .then((response) => {
-          if (msg?.type === 'set-chat-width') {
-            // #region agent log
-            fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6155d5'},body:JSON.stringify({sessionId:'6155d5',runId:'initial-debug',hypothesisId:'H1',location:'popup.js:125',message:'chat width sendMessage resolved',data:{tabId:tabs[0]?.id ?? null,msgValue:msg?.value,response:response ?? null},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-          }
-          // #region agent log
-          fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'767ac1'},body:JSON.stringify({sessionId:'767ac1',runId:'initial-debug',hypothesisId:'H2',location:'popup.js:55',message:'sendMessage resolved',data:{msgType:msg?.type,msgValue:msg?.value,tabId:tabs[0]?.id,response:response ?? null},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
+          if (typeof onResponse === 'function') onResponse(response);
         })
-        .catch((error) => {
-          if (msg?.type === 'set-chat-width') {
-            // #region agent log
-            fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6155d5'},body:JSON.stringify({sessionId:'6155d5',runId:'initial-debug',hypothesisId:'H1',location:'popup.js:134',message:'chat width sendMessage rejected',data:{tabId:tabs[0]?.id ?? null,msgValue:msg?.value,error:error?.message || String(error)},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-          }
-          // #region agent log
-          fetch('http://127.0.0.1:7701/ingest/fb728793-037f-4a0f-82ac-b7d0acca2df3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'767ac1'},body:JSON.stringify({sessionId:'767ac1',runId:'initial-debug',hypothesisId:'H2',location:'popup.js:59',message:'sendMessage rejected',data:{msgType:msg?.type,msgValue:msg?.value,tabId:tabs[0]?.id,error:error?.message || String(error)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
-        });
+        .catch(() => {});
     }
   });
 }
